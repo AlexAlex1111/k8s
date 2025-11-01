@@ -1,5 +1,5 @@
 {% if role in ['server-worker', 'worker'] %}
-server: {{ rke2_server_url }}
+server: https://{{ groups['servers'][0] }}:9345
 token: {{ lookup('file', rke2_token_local) | trim }}
 {% endif %}
 
