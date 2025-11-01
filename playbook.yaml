@@ -1,0 +1,132 @@
+---
+- name: Deploy RKE2 Cluster
+  hosts: all
+  become: yes
+  vars:
+    rke2_server_url: "https://{{ hostvars['node1'].ansible_host }}:9345"
+    rke2_config_dir: "/etc/rancher/rke2"
+    rke2_token_file: "/var/lib/rancher/rke2/server/node-token"
+    rke2_token_local: "./rke2_token"
+    kubectl_version: "v1.29.6"  # specify the kubectl version
+
+  tasks:
+    - name: Update and upgrade packages
+      apt:
+        update_cache: yes
+        upgrade: dist
+      when: ansible_os_family == "Debian"
+
+    - name: Disable swap
+      command: swapoff -a
+      become: yes
+
+    - name: Remove swap entry from /etc/fstab
+      replace:
+        path: /etc/fstab
+        regexp: '^([^#].*swap.*)$'
+        replace: '# \1'
+
+    ####################################################################
+    # INSTALL KUBECTL
+    ####################################################################
+    - name: Download kubectl binary
+      get_url:
+        url: "https://dl.k8s.io/release/{{ kubectl_version }}/bin/linux/amd64/kubectl"
+        dest: /usr/local/bin/kubectl
+        mode: '0755'
+      when: not ansible_facts['pkg_mgr'] == 'yum' or ansible_facts['distribution_version']|version_compare('18.04', '>=')
+      register: kubectl_download
+
+    - name: Ensure kubectl is executable
+      file:
+        path: /usr/local/bin/kubectl
+        mode: '0755'
+
+    ####################################################################
+    # RKE2 INSTALLATION CHECK
+    ####################################################################
+    - name: Check if RKE2 server is installed
+      stat:
+        path: /usr/local/bin/rke2
+      register: rke2_stat
+
+    ####################################################################
+    # SERVER-ONLY NODE
+    ####################################################################
+    - name: Install RKE2 server on node1 if not installed
+      shell: |
+        curl -sfL https://get.rke2.io | sh -
+        systemctl enable rke2-server.service
+        systemctl start rke2-server.service
+      when: inventory_hostname == "node1" and not rke2_stat.stat.exists
+
+    - name: Wait for node1 token to exist
+      stat:
+        path: "{{ rke2_token_file }}"
+      register: token_stat
+      until: token_stat.stat.exists
+      retries: 30
+      delay: 10
+      when: inventory_hostname == "node1"
+
+    - name: Fetch RKE2 token from node1
+      fetch:
+        src: "{{ rke2_token_file }}"
+        dest: "{{ rke2_token_local }}"
+        flat: yes
+      when: inventory_hostname == "node1"
+
+    ####################################################################
+    # SERVER-WORKER NODES
+    ####################################################################
+    - name: Install RKE2 server on server-worker nodes if not installed
+      shell: |
+        curl -sfL https://get.rke2.io | sh -
+        systemctl enable rke2-server.service
+        systemctl start rke2-server.service
+      when: hostvars[inventory_hostname].role == "server-worker" and not rke2_stat.stat.exists
+
+    ####################################################################
+    # WORKER NODES
+    ####################################################################
+    - name: Install RKE2 agent on worker nodes if not installed
+      shell: |
+        curl -sfL https://get.rke2.io | INSTALL_RKE2_TYPE="agent" sh -
+        systemctl enable rke2-agent.service
+        systemctl start rke2-agent.service
+      when: hostvars[inventory_hostname].role == "worker" and not rke2_stat.stat.exists
+
+    ####################################################################
+    # CONFIGURATION FILES USING TEMPLATE
+    ####################################################################
+    - name: Ensure RKE2 config directory exists
+      file:
+        path: "{{ rke2_config_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Generate RKE2 config from template
+      template:
+        src: rke2-config.yaml.j2
+        dest: "{{ rke2_config_dir }}/config.yaml"
+        owner: root
+        group: root
+        mode: '0644'
+      vars:
+        role: "{{ hostvars[inventory_hostname].role }}"
+
+    ####################################################################
+    # INSTALL crictl (default container runtime tool)
+    ####################################################################
+    - name: Download crictl
+      get_url:
+        url: https://github.com/kubernetes-sigs/cri-tools/releases/download/v1.27.1/crictl-v1.27.1-linux-amd64.tar.gz
+        dest: /tmp/crictl.tar.gz
+      register: crictl_download
+
+    - name: Extract crictl binary
+      unarchive:
+        src: /tmp/crictl.tar.gz
+        dest: /usr/local/bin/
+        remote_src: yes
+        mode: '0755'

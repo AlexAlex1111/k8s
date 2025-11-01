@@ -1,0 +1,6 @@
+{% if role in ['server-worker', 'worker'] %}
+server: {{ rke2_server_url }}
+token: {{ lookup('file', rke2_token_local) | trim }}
+{% endif %}
+
+node-name: {{ inventory_hostname }}
