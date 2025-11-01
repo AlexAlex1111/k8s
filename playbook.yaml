@@ -7,7 +7,8 @@
     rke2_config_dir: "/etc/rancher/rke2"
     rke2_token_file: "/var/lib/rancher/rke2/server/node-token"
     rke2_token_local: "./rke2_token"
-    kubectl_version: "v1.29.6"  # specify the kubectl version
+    kubectl_version: "v1.29.6"
+    crictl_version: "v1.34.0"
 
   tasks:
     - name: Update and upgrade packages
@@ -34,7 +35,7 @@
         url: "https://dl.k8s.io/release/{{ kubectl_version }}/bin/linux/amd64/kubectl"
         dest: /usr/local/bin/kubectl
         mode: '0755'
-      when: not ansible_facts['pkg_mgr'] == 'yum' or ansible_facts['distribution_version']|version_compare('18.04', '>=')
+      when: not ansible_facts['pkg_mgr'] == 'yum' or ansible_facts['distribution_version'] is version('18.04', '>=')
       register: kubectl_download
 
     - name: Ensure kubectl is executable
@@ -107,7 +108,7 @@
 
     - name: Generate RKE2 config from template
       template:
-        src: rke2-config.yaml.j2
+        src: templates/rke2-config.yaml.j2
         dest: "{{ rke2_config_dir }}/config.yaml"
         owner: root
         group: root
@@ -120,7 +121,7 @@
     ####################################################################
     - name: Download crictl
       get_url:
-        url: https://github.com/kubernetes-sigs/cri-tools/releases/download/v1.27.1/crictl-v1.27.1-linux-amd64.tar.gz
+        url: https://github.com/kubernetes-sigs/cri-tools/releases/download/{{  crictl_version  }}/crictl-{{  crictl_version  }}-linux-amd64.tar.gz
         dest: /tmp/crictl.tar.gz
       register: crictl_download
 
