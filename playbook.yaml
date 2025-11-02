@@ -59,10 +59,9 @@
     ####################################################################
     - name: Install RKE2 server
       shell: |
-        curl -sfL https://get.rke2.io | sh -
-        systemctl enable rke2-server.service
-        systemctl start rke2-server.service
-      when: "'server' in hostvars[inventory_hostname].role and not rke2_stat.stat.exists"
+        curl -sfL https://get.rke2.io | INSTALL_RKE2_TYPE="server" sh -
+        systemctl enable rke2-agent.service
+      when: "'server-only' in hostvars[inventory_hostname].role and not rke2_stat.stat.exists"
 
     - name: Wait for RKE2 token to exist
       stat:
@@ -78,16 +77,15 @@
         src: "{{ rke2_token_file }}"
         dest: "{{ rke2_token_local }}"
         flat: yes
-      when: inventory_hostname == "node1"
+      when: inventory_hostname == groups['servers'][0]
 
     ####################################################################
     # SERVER-WORKER NODES
     ####################################################################
     - name: Install RKE2 server on server-worker nodes if not installed
       shell: |
-        curl -sfL https://get.rke2.io | sh -
+        curl -sfL https://get.rke2.io | INSTALL_RKE2_TYPE="server" sh -
         systemctl enable rke2-server.service
-        systemctl start rke2-server.service
       when: hostvars[inventory_hostname].role == "server-worker" and not rke2_stat.stat.exists
 
     ####################################################################
@@ -97,7 +95,6 @@
       shell: |
         curl -sfL https://get.rke2.io | INSTALL_RKE2_TYPE="agent" sh -
         systemctl enable rke2-agent.service
-        systemctl start rke2-agent.service
       when: hostvars[inventory_hostname].role == "worker" and not rke2_stat.stat.exists
 
     ####################################################################
@@ -119,24 +116,12 @@
       vars:
         role: "{{ hostvars[inventory_hostname].role }}"
 
-    ####################################################################
-    # INSTALL CRICTL (container runtime tool)
-    ####################################################################
-    - name: Check if crictl is installed
-      stat:
-        path: /usr/local/bin/crictl
-      register: crictl_stat
+    - name: Start RKE2 server
+      shell: |
+        systemctl start rke2-server.service
+      when: "'server' in hostvars[inventory_hostname].role"
 
-    - name: Download crictl if not installed
-      get_url:
-        url: https://github.com/kubernetes-sigs/cri-tools/releases/download/{{  crictl_version  }}/crictl-{{  crictl_version  }}-linux-amd64.tar.gz
-        dest: /tmp/crictl.tar.gz
-      when: not crictl_stat.stat.exists
-
-    - name: Extract crictl binary if not installed
-      unarchive:
-        src: /tmp/crictl.tar.gz
-        dest: /usr/local/bin/
-        remote_src: yes
-        mode: '0755'
-      when: not crictl_stat.stat.exists
+    - name: Start RKE2 agent on worker nodes
+      shell: |
+        systemctl start rke2-agent.service
+      when: 'hostvars[inventory_hostname].role == "worker" and rke2_stat.stat.exists'
